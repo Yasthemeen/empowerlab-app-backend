@@ -1,3 +1,5 @@
+/* eslint-disable consistent-return */
+// kiwi: uncomment for mongo code
 const { default: mongoose } = require('mongoose');
 const InputNode = require('../models/inputNode');
 
@@ -30,6 +32,8 @@ exports.getTherapistInputs = async (req, res) => {
       && !c.name.startsWith('relationships')
       && !c.name.startsWith('inputnodes')
       && !c.name.startsWith('extratherapeutic')
+      && !c.name.startsWith('therapist')
+      && !c.name.startsWith('client')
       );
     });
 
@@ -56,7 +60,7 @@ exports.getTherapistInputs = async (req, res) => {
         return {
           name,
           label: name.charAt(0).toUpperCase() + name.slice(1),
-          factors,
+          factors: factors.map(toTitleCase),
           dependsOn: dependsOn.length ? dependsOn : null,
         };
       }),
@@ -114,15 +118,101 @@ exports.getClientInputs = async (req, res) => {
   }
 };
 
-// Processes submitted inputs and returns a dummy result for now
+const submissionSchema = new mongoose.Schema({
+  role: { type: String, enum: ['client', 'therapist'], required: true },
+  submittedAt: { type: Date, default: Date.now },
+  responses: { type: mongoose.Schema.Types.Mixed },
+});
+
+const ClientSubmission = mongoose.model('ClientSubmission', submissionSchema, 'client_submissions');
+const TherapistSubmission = mongoose.model('TherapistSubmission', submissionSchema, 'therapist_submissions');
+
 exports.processInputs = async (req, res) => {
   try {
-    const selected = req.body;
-    // kiwi: replace with actual logic
-    const result = `Selected Treatment: ${selected.treatment}, Label: ${selected.mediators}`;
-    res.status(200).json({ result });
+    const { responses, role = null } = req.body;
+
+    if (!responses || !role) {
+      return res.status(400).json({ error: 'Missing data in submission' });
+    }
+
+    const submissionData = {
+      role,
+      responses,
+    };
+
+    let SubmissionModel = null;
+    if (role === 'client') SubmissionModel = ClientSubmission;
+    else if (role === 'therapist') SubmissionModel = TherapistSubmission;
+    else return res.status(400).json({ error: 'Invalid role submitted' });
+    console.log('Saving submission:', submissionData);
+
+    await new SubmissionModel(submissionData).save();
+
+    console.log('Submission saved to MongoDB');
+
+    res.status(200).json({ result: 'Submission saved successfully' });
   } catch (err) {
-    console.error('Processing error:', err);
+    console.error('Error saving submission:', err);
+    res.status(500).json({ error: 'Failed to save submission' });
+  }
+};
+
+exports.addFactor = async (req, res) => {
+  const { inputName, newFactor } = req.body;
+
+  if (!inputName || !newFactor) {
+    return res.status(400).json({ error: 'Missing inputName or newFactor' });
+  }
+
+  try {
+    const model = mongoose.models[inputName]
+      || mongoose.model(inputName, new mongoose.Schema({}, { strict: false }), inputName);
+
+    const exists = await model.findOne({ Factor: newFactor });
+    if (exists) {
+      return res.status(409).json({ message: 'Factor already exists' });
+    }
+
+    await model.create({ Factor: newFactor });
+    console.log(`Added "${newFactor}" to "${inputName}" collection`);
+    res.status(201).json({ message: 'Factor added successfully' });
+  } catch (err) {
+    console.error('Error adding factor:', err);
     res.status(500).json({ error: 'Server error' });
+  }
+};
+
+exports.searchInputs = async (req, res) => {
+  try {
+    const { responses } = req.body;
+    console.log('Received search data:', responses);
+
+    if (!responses || Object.keys(responses).length === 0) {
+      return res.status(400).json({ error: 'No search data provided' });
+    }
+
+    const allTherapistSubmissions = await TherapistSubmission.find();
+
+    const matchingSubmission = allTherapistSubmissions.find((submission) => {
+      const therapistResponses = submission.responses;
+
+      // Only compare keys that have a non-empty value
+      const nonEmptyEntries = Object.entries(responses).filter(
+        ([_, value]) => { return value && value.trim() !== ''; },
+      );
+
+      return nonEmptyEntries.every(([key, value]) => {
+        return therapistResponses[key]?.toLowerCase?.() === value.toLowerCase();
+      });
+    });
+
+    if (!matchingSubmission) {
+      return res.status(200).json({ result: {} });
+    }
+
+    return res.status(200).json({ result: matchingSubmission.responses });
+  } catch (err) {
+    console.error('Error during search:', err);
+    res.status(500).json({ error: 'Search failed' });
   }
 };
