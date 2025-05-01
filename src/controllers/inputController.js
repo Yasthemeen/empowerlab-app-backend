@@ -78,7 +78,7 @@ exports.getClientInputs = async (req, res) => {
   try {
     const allowedCollections = [
       'treatment',
-      'mediators',
+      'moderators',
       'extratheraputic factors',
       'clinical outcome in patient',
     ];
