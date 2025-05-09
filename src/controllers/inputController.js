@@ -120,8 +120,10 @@ exports.getClientInputs = async (req, res) => {
 
 const submissionSchema = new mongoose.Schema({
   role: { type: String, enum: ['client', 'therapist'], required: true },
-  submittedAt: { type: Date, default: Date.now },
   responses: { type: mongoose.Schema.Types.Mixed },
+  impacts: { type: Object, default: {} },
+  quantifiers: { type: Object, default: {} },
+  submittedAt: { type: Date, default: Date.now },
 });
 
 const ClientSubmission = mongoose.model('ClientSubmission', submissionSchema, 'client_submissions');
@@ -129,7 +131,9 @@ const TherapistSubmission = mongoose.model('TherapistSubmission', submissionSche
 
 exports.processInputs = async (req, res) => {
   try {
-    const { responses, role = null } = req.body;
+    const {
+      responses, role = null, impacts = {}, quantifiers = {},
+    } = req.body;
 
     if (!responses || !role) {
       return res.status(400).json({ error: 'Missing data in submission' });
@@ -138,13 +142,15 @@ exports.processInputs = async (req, res) => {
     const submissionData = {
       role,
       responses,
+      impacts,
+      quantifiers,
     };
 
     let SubmissionModel = null;
     if (role === 'client') SubmissionModel = ClientSubmission;
     else if (role === 'therapist') SubmissionModel = TherapistSubmission;
     else return res.status(400).json({ error: 'Invalid role submitted' });
-    console.log('Saving submission:', submissionData);
+    console.log('Saving submission:', JSON.stringify(submissionData, null, 2));
 
     await new SubmissionModel(submissionData).save();
 
